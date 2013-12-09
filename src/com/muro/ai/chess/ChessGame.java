@@ -12,51 +12,59 @@ import org.json.JSONObject;
 public class ChessGame {
 
 	public static void main(String[] args) throws IOException {
-		
+
 		if (args.length < 3) {
 			System.out.println("Invalid argument list. Please enter a game ID, team number, and team secert.");
 			System.out.println("For example:\n  ChessGame <gameId> <teamNumber> <teamSecret>");
 			System.exit(-1);
 		}
-		
+
 		ChessGame theGame = new ChessGame(args[0], args[1], args[2]);
+		System.out.println(theGame.gameBoard);
+		
 		Scanner in = new Scanner(System.in);
 		String userInput = null;
-		String result = null;
 		boolean valid = false;
-		
+
 		/** The Game Loop **/
 		while (!theGame.isGameOver) {
+			
 			// Sync our local game state with the server.
 			theGame.updateGameState();
 			// Display the game state on standard output.
 			System.out.println(theGame);
-			
+			System.out.println(theGame.gameBoard);
+
 			// Check if it is our turn.
 			if (theGame.isPlayersMove) {
 				valid = false;
 				// Loop until the user provides a valid move string.
 				while (!valid) {
+					
+					// Prompt the user for a move.
 					System.out.print("Your move: ");
 					userInput = in.nextLine().trim();
-					result = theGame.sendMove(userInput);
-					
-					if (!result.equalsIgnoreCase("valid")) {
-						System.out.println("Invalid move. " + result);
+
+					// Send the move to the server.
+					if (!theGame.sendMove(userInput)) {
+						System.out.println("Invalid move. Try again");
 					} else {
+						theGame.gameBoard.performMove(userInput);
 						valid = true;
 					}
 				}
-			} else { 
-				// Sleep for five seconds.
+			} else {
+				// Wait for your opponent to make a move...
 				ChessGame.waitPatiently(5 * MILLIS_PER_SEC);
 			}
 		}
-		
+
+		in.close(); // clean up resources
+
+		// Determine who the winner was and output the result.
 		JSONObject jsonObj = new JSONObject(theGame.pollServer());
-		int winner = jsonObj.getInt("winner");
-		System.out.println("Game Over. Player " + winner + " won.");
-		in.close();
+		System.out.println("Game Over. Player " + jsonObj.getInt("winner") + " won.");
+
 	}
 
 	/**
@@ -67,43 +75,43 @@ public class ChessGame {
 	 * @param teamSecret a string used to communicate with the game server
 	 */
 	public ChessGame(String gameId, String teamNumber, String teamSecret) {
-		
+
 		// Build the URL's required for polling the server and passing move strings.
 		pollUrl = SERVER_URL + "poll/" + gameId + "/" + teamNumber + "/" + teamSecret + "/";
 		moveUrl = SERVER_URL + "move/" + gameId + "/" + teamNumber + "/" + teamSecret + "/";
-					
+
 		// Create a new game board initialized to the default state.
 		gameBoard = new ChessBoard();
-		
+
 	}
-	
+
 	/**
 	 * Queries the server for the game state and updates the local game state appropriately. 
 	 */
 	public void updateGameState() {
-		
+
 		// Query the server for the game state.
 		String response = this.pollServer();
-		
+
 		// Use a JSONObject to parse the JSON string.
 		JSONObject jsonObj = new JSONObject(response);
 		isPlayersMove = jsonObj.getBoolean("ready");
 		timeRemaining = jsonObj.getDouble("secondsleft");
 		moveCount = jsonObj.getInt("lastmovenumber");
-		
+
 		// If it is currently our turn AND this is NOT the first turn of the game.
 		if (isPlayersMove && moveCount > 0) {
 			lastMove = jsonObj.getString("lastmove");
 			// Update the game board with our opponent's last move.
 			gameBoard.performMove(jsonObj.getString("lastmove"));
 		} else { // Its not our turn.
-			 // Check if the game is over.
+			// Check if the game is over.
 			if (jsonObj.has("gameover") && jsonObj.getBoolean("gameover")) {
 				isGameOver = true;
 			}
 		}
 	}
-	
+
 	/**
 	 * Sends a move to the server. Returns a JSON string containing the result of the move.
 	 * 
@@ -111,21 +119,18 @@ public class ChessGame {
 	 * 
 	 * @return the response string received from the server
 	 */
-	public String sendMove(String moveString) {
+	public boolean sendMove(String moveString) {
 		
+		// Send the move string to the server.
 		String response = sendRequest(moveUrl + moveString + "/");
-		
-		// Use a JSONObject to parse the JSON string.
+
+		// Use a JSONObject to parse the response.
 		JSONObject jsonObj = new JSONObject(response);
 		boolean isValid = jsonObj.getBoolean("result");
-		
-		if (isValid) {
-			return "valid";
-		} else {
-			return "invalid: " + jsonObj.getString("message");
-		}
+
+		return isValid;
 	}
-	
+
 	/**
 	 * 
 	 */
@@ -141,7 +146,7 @@ public class ChessGame {
 	private String pollServer() {
 		return sendRequest(pollUrl);
 	}
-	
+
 	/**
 	 * Makes a HTTP GET request to the specified URL. 
 	 * 
@@ -153,7 +158,7 @@ public class ChessGame {
 		URL serverConn;
 		String response = null;
 		BufferedReader fromServer = null;
-		
+
 		try {
 			// Construct the URL.
 			serverConn = new URL(urlString);
@@ -169,10 +174,10 @@ public class ChessGame {
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
-		
+
 		return response;
 	}
-	
+
 	/**
 	 * A utility method that causes the current thread to sleep for the specified duration.
 	 * This is used while we our waiting for our opponent to make a move.
@@ -187,12 +192,12 @@ public class ChessGame {
 			e.printStackTrace();
 		}
 	}
-	
+
 	/**
 	 * Used to track the pieces and their locations.
 	 */
 	private ChessBoard gameBoard = null;
-	
+
 	/**
 	 * Indicates whether it is the player's turn (true) or the opponents (false).
 	 */
@@ -202,22 +207,22 @@ public class ChessGame {
 	 * Used to send a move to the server.
 	 */
 	private String moveUrl = null;
-	
+
 	/**
 	 * Used to poll the server during the opponent's turn.
 	 */
 	private String pollUrl = null;
-	
+
 	/**
 	 * The total amount of time available to the player for deciding upon a move.
 	 */
 	private double timeRemaining = 0;
-	
+
 	/**
 	 * The total number of moves made by both players.
 	 */
 	private int moveCount = 0;
-	
+
 	/**
 	 * The last move made by the opponent.
 	 */
@@ -226,12 +231,12 @@ public class ChessGame {
 	 * A flag indicating whether the game is over.
 	 */
 	private boolean isGameOver = false;
-	
+
 	/**
 	 * The URL of the game server.
 	 */
 	private static String SERVER_URL = "http://www.bencarle.com/chess/";
-	
+
 	/**
 	 * The default wait time.
 	 */
